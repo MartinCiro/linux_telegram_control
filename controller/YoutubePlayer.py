@@ -1,5 +1,6 @@
 # controller/YoutubePlayer.py
 from asyncio import sleep as asy_slp
+import logging
 from random import uniform
 from logging import getLogger
 
@@ -115,3 +116,59 @@ class YoutubePlayer:
         except Exception as e:
             self._log("ERROR", f"❌ Error en YouTube: {e}", "PLAY")
             return False
+        
+    async def search(self, query: str = None) -> list:
+        """
+        Busca en YouTube y retorna lista de títulos de los primeros resultados.
+        ✅ Sin networkidle, ✅ Espera a elementos reales, ✅ Compatible con hover/mouse
+        """
+        try:
+            yt_query = query or getattr(self.config, 'youtube_query', 'lofi hip hop radio')
+            self._log("INFO", f"🔍 Buscando: {yt_query}")
+            
+            # 1️⃣ Navegar a YouTube (solo domcontentloaded)
+            await self.page.goto("https://www.youtube.com", wait_until="domcontentloaded", timeout=30000)
+            
+            # ❌ ELIMINADO: await self.page.wait_for_load_state("networkidle")
+            await asy_slp(uniform(0.5, 1.2))
+            await self._accept_cookies_if_needed()
+            
+            # 2️⃣ Escribir búsqueda
+            search_box = self.page.locator(f'xpath={YoutubePlayer.XPATH_SEARCH_BOX}')
+            await search_box.fill(yt_query, timeout=5000)
+            await asy_slp(uniform(0.2, 0.4))
+            await search_box.press("Enter", delay=50)
+            
+            # ❌ ELIMINADO: await self.page.wait_for_load_state("networkidle")
+            # ✅ Esperar a que los resultados se rendericen (elemento real)
+            await self.page.wait_for_selector('ytd-video-renderer', timeout=10000)
+            await asy_slp(uniform(0.8, 1.5))  # Tiempo para que YouTube cargue thumbnails/títulos
+            
+            # 3️⃣ Extraer primeros 5 resultados
+            results = []
+            for i in range(5):  # Limitar a 5
+                try:
+                    title_locator = self.page.locator(f'xpath=(//ytd-video-renderer//a[@id="video-title"])[{i+1}]')
+                    
+                    # Verificar que el elemento existe antes de extraer
+                    if await title_locator.count() == 0:
+                        continue
+                        
+                    title = await title_locator.text_content()
+                    href = await title_locator.get_attribute('href')
+                    
+                    if title and href:
+                        results.append({
+                            "index": i + 1,
+                            "title": title.strip(),
+                            "url": f"https://youtube.com{href}" if href.startswith('/watch') else href
+                        })
+                except Exception:
+                    continue  # Saltar si un resultado falla, continuar con los demás
+            
+            self._log("SUCCESS", f"✅ {len(results)} resultados encontrados")
+            return results
+            
+        except Exception as e:
+            self._log("ERROR", f"❌ Error buscando: {e}", "SEARCH")
+            return []
