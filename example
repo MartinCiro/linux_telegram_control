@@ -1,0 +1,3 @@
+HEADLESS=True or False
+TELEGRAM_TOKEN=Token de bot en telegram
+TELEGRAM_CHAT=id usuario

@@ -1,0 +1,19 @@
+services:
+  python_bot:
+    container_name: scrapper_turnos_back
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /app
+    environment:
+      - USERS_ECO=${USERS_ECO}
+      - PASSWDS_ECO=${PASSWDS_ECO}
+      - HEADLESS=${HEADLESS}
+      - DISPLAY=:0
+      - PYTHONUNBUFFERED=1
+      
+    privileged: true
+
+    command: ["/bin/sh", "-c", "python main.py"]
+
+    restart: unless-stopped
