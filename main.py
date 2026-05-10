@@ -8,56 +8,220 @@ from controller.YoutubePlayer import YoutubePlayer
 from os import path as os_path
 from random import uniform
 
+async def ensure_first_tab(context, config):
+    """
+    Asegura que la primera pestaña esté activa y limpia.
+    Retorna la página de la primera pestaña.
+    """
+    if len(context.pages) == 0:
+        # No hay páginas, crear una nueva
+        page = await context.new_page()
+        config.log.comentario("INFO", "📑 Creada nueva pestaña principal")
+    else:
+        # Usar la primera pestaña existente
+        page = context.pages[0]
+        config.log.comentario("INFO", f"📑 Usando pestaña principal (Total: {len(context.pages)} pestañas)")
+        
+        # Si hay más pestañas, cerrarlas opcionalmente
+        if len(context.pages) > 1:
+            config.log.comentario("INFO", f"🧹 Cerrando {len(context.pages)-1} pestañas adicionales")
+            for i in range(len(context.pages) - 1, 0, -1):
+                await context.pages[i].close()
+    
+    # Asegurar que la página esté activa
+    await page.bring_to_front()
+    return page
+
 async def init_browser(config: Config):
-    """Inicializa Playwright y retorna (playwright, browser, context, page)"""
+    """Inicializa Playwright con técnicas avanzadas de stealth."""
     
     playwright = await async_playwright().start()
     user_data_dir = os_path.expanduser("~/.config/BraveSoftware/Brave-Browser-Playwright")
     if not os_path.exists(user_data_dir):
         os_path.makedirs(user_data_dir, exist_ok=True)
     
+    brave_exec = config.get_chrome_path()
+    if not brave_exec:
+        config.log.comentario("ERROR", "No se encontró la ruta de Brave.")
+        return None
+    
+    # Configuración optimizada de argumentos
     launch_options = {
         'headless': config.headless.lower() == 'true',
+        'executable_path': brave_exec,
         'args': [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-blink-features=AutomationControlled',
+            # Sandbox y rendimiento
             '--disable-dev-shm-usage',
+            
+            # Anti-detección de automatización (Chromium/Playwright)
+            '--disable-blink-features=AutomationControlled',
+            '--disable-features=IsolateOrigins,site-per-process,AutomationControlled',
+            
+            # Ventana y viewport consistente
             '--window-size=1920,1080',
-            '--autoplay-policy=no-user-gesture-required',
-            '--brave-shields-enabled=true',
-            '--brave-ad-block-enabled=true',
+            '--viewport-size=1920,1080',
+            
+            # Limpieza de huellas de automatización
             '--disable-infobars',
             '--disable-extensions',
-            '--window-size=1920,1080',
+            '--disable-component-update',
+            '--no-first-run',
+            '--disable-default-apps',
+            '--disable-sync',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-ipc-flooding-protection',
+            
+            # Configuración de medios y autoplay
+            '--autoplay-policy=no-user-gesture-required',
+            '--enable-features=MediaRouter',
+            
+            # Idioma y regionalización
+            '--lang=es-ES',
+            '--accept-lang=es-ES,es,en-US,en',
+            
+            # Brave-specific: desactivar shields para evitar conflictos con fingerprinting
+            '--disable-brave-component-updates',
         ],
-        'channel': 'chrome',
+        'ignore_default_args': ['--enable-automation'], 
     }
     
-    chrome_path = config.get_chrome_path()
-    if chrome_path:
-        config.log.comentario("INFO", f"🌐 Usando Chrome: {chrome_path}")
-        launch_options['executable_path'] = chrome_path
-    else:
-        config.log.comentario("INFO", "🌐 Usando Chromium interno de Playwright")
-    
+    # Crear contexto
     context = await playwright.chromium.launch_persistent_context(
         user_data_dir=user_data_dir,
         **launch_options
     )
 
-    browser = context.browser
-    page = context.pages[0] if context.pages else await context.new_page()
-    await page.add_init_script("""
-        delete navigator.__proto__.webdriver;
-        window.navigator.chrome = { runtime: {}, loadTimes: function() {}, connection: function() {} };
-        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-        Object.defineProperty(navigator, 'languages', { get: () => ['es-ES', 'es', 'en-US', 'en'] });
-    """)
+    stealth_script = """
+        // 1. Eliminar webdriver de forma segura para Playwright
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined,
+            configurable: true
+        });
+        
+        // 2. Simular window.chrome real (estructura mínima que esperan los detectores)
+        if (!window.navigator.chrome) {
+            window.navigator.chrome = {
+                runtime: {},
+                loadTimes: function() { return {}; },
+                csi: function() { return {}; },
+                connection: function() { return { type: 'wifi', downlink: 10, rtt: 50 }; }
+            };
+        }
+        
+        // 3. Plugins realistas con Prototype correcto
+        const mockPlugins = {
+            length: 3,
+            item: function(index) { return this[index] || null; },
+            namedItem: function(name) { return this[name] || null; },
+            refresh: function() { return []; },
+            0: {
+                name: 'Chrome PDF Plugin',
+                filename: 'internal-pdf-viewer',
+                description: 'Portable Document Format',
+                version: '1.0.0.0',
+                length: 0,
+                item: function() { return null; },
+                namedItem: function() { return null; }
+            },
+            1: {
+                name: 'Chrome PDF Viewer',
+                filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai',
+                description: 'Portable Document Format',
+                version: '1.0.0.0',
+                length: 0,
+                item: function() { return null; },
+                namedItem: function() { return null; }
+            },
+            2: {
+                name: 'Native Client',
+                filename: 'internal-nacl-plugin',
+                description: '',
+                version: '1.0.0.0',
+                length: 0,
+                item: function() { return null; },
+                namedItem: function() { return null; }
+            }
+        };
+        Object.setPrototypeOf(mockPlugins, PluginArray.prototype);
+        Object.defineProperty(navigator, 'plugins', {
+            get: () => mockPlugins,
+            configurable: true
+        });
+        
+        // 4. Idiomas coherentes con el locale del sistema
+        Object.defineProperty(navigator, 'languages', {
+            get: () => ['es-ES', 'es', 'en-US', 'en'],
+            configurable: true
+        });
+        Object.defineProperty(navigator, 'language', {
+            get: () => 'es-ES',
+            configurable: true
+        });
+        
+        // 5. Parchear Function.toString para evitar detección de código inyectado
+        const nativeToString = Function.prototype.toString;
+        const nativeHasOwnProperty = Object.prototype.hasOwnProperty;
+        
+        Function.prototype.toString = function() {
+            if (nativeHasOwnProperty.call(this, 'name') && this.name === 'get webdriver') {
+                return 'function get webdriver() { [native code] }';
+            }
+            return nativeToString.call(this);
+        };
+        
+        // 6. Permisos silenciosos (evita prompts que delatan automatización)
+        const originalQuery = window.navigator.permissions?.query;
+        if (originalQuery) {
+            window.navigator.permissions.query = function(parameters) {
+                if (parameters.name === 'notifications') {
+                    return Promise.resolve({
+                        state: Notification.permission || 'default',
+                        onchange: null,
+                        addEventListener: function() {},
+                        removeEventListener: function() {},
+                        dispatchEvent: function() { return false; }
+                    });
+                }
+                return originalQuery.apply(this, arguments);
+            };
+        }
+        
+        // 7. Screen y hardware coherentes con viewport 1920x1080
+        Object.defineProperty(screen, 'width', { get: () => 1920, configurable: true });
+        Object.defineProperty(screen, 'height', { get: () => 1080, configurable: true });
+        Object.defineProperty(screen, 'availWidth', { get: () => 1920, configurable: true });
+        Object.defineProperty(screen, 'availHeight', { get: () => 1080, configurable: true });
+        Object.defineProperty(screen, 'colorDepth', { get: () => 24, configurable: true });
+        Object.defineProperty(screen, 'pixelDepth', { get: () => 24, configurable: true });
+        
+        // 8. Hardware concurrency y deviceMemory realistas para un i5/Ryzen moderno
+        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8, configurable: true });
+        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8, configurable: true });
+        
+        // 9. Eliminar propiedades de Playwright que puedan delatar
+        delete window.__playwright;
+        delete window.__pw_manual;
+        delete window.__PW_inspect;
+    """
 
-    config.log.comentario("INFO", f"🌐 Brave con perfil persistente: {user_data_dir}")
+    await context.add_init_script(stealth_script)
     
-    return playwright, browser, page
+
+    await context.set_extra_http_headers({
+        'Accept-Language': 'es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Brave";v="122"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Linux"'
+    })
+
+    page = context.pages[0] if context.pages else await context.new_page()
+    page = await ensure_first_tab(context, config) if context.pages else await context.new_page()
+    
+    config.log.comentario("INFO", "🌐 Navegador Brave iniciado con stealth mejorado.")
+    
+    return playwright, context.browser, page 
 
 async def play_youtube(config: Config, page, query: str = None) -> int:
     """Wrapper que retorna código de salida (0=éxito, 1=error)"""
@@ -110,7 +274,6 @@ async def play_youtube_interactive(config: Config, page) -> bool:
         print("❌ Entrada inválida")
         return False
     
-
 async def main():
     try:
         config = Config()
@@ -118,7 +281,6 @@ async def main():
         
         print("🎵 YouTube Player Interactivo - Escribe 'q' para salir en cualquier momento\n")
 
-        # 🔁 LOOP PRINCIPAL: permite buscar varios videos sin reiniciar el navegador
         while True:
             success = await play_youtube_interactive(config, page)
             if not success:
@@ -129,7 +291,14 @@ async def main():
             await page.wait_for_load_state("domcontentloaded")
             await asy_sleep(uniform(0.3, 0.7))
             
-            await page.keyboard.press('M')
+            volume_button = page.locator("xpath=//button[@class='ytp-volume-icon ytp-button' and (starts-with(@data-tooltip-title, 'Unmute') or @data-tooltip-title='Unmute (m)')]")
+            await asy_sleep(uniform(0.5, 0.1))
+
+            button_count = await volume_button.count()
+
+            if button_count > 0:
+                await page.keyboard.press('M')
+
             # ✅ Corrección crítica: config.headless es string, no booleano
             if config.headless.lower() == 'false':
                 input("⏸️ Presiona Enter para buscar otro video o salir...")
