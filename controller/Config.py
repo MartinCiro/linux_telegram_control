@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Dict, Optional, List
 
 from dotenv import load_dotenv
 from os import getenv, path as os_path, remove
@@ -7,18 +7,12 @@ from controller.utils.file import FileUtils
 from controller.Log import Log
 
 @dataclass
-class RenderConfig:
-    width: int
-    height: int
-    output_dir: str
-
-
-@dataclass
-class TemplateConfig:
-    font_family: str
-    primary_color: str
-    background_color: str
-
+class Command:
+    """Define un comando y su acción"""
+    trigger_words: List[str]
+    action: str
+    description: str
+    parameters: Optional[Dict] = None 
 
 class Config:
     """
@@ -32,7 +26,11 @@ class Config:
         self.chrome_path: str = getenv("CHROME_PATH", "")
         self.cookies_base_path: str = getenv("COOKIES_PATH", "./cookies")
         self.config_json: str = getenv("CONFIG_JSON", "./config.json")
+        self.telegram_token: str = getenv("TELEGRAM_TOKEN")
+        self.telegram_chat: str = getenv("TELEGRAM_CHAT")
         self.log = Log()
+
+        self._commands_cache: Optional[Dict[str, Command]] = None
 
     @property
     def youtube_query(self) -> str:
@@ -45,6 +43,45 @@ class Config:
             return value
          
         return getenv("YOUTUBE_QUERY", "lofi hip hop radio")
+    
+    @property
+    def commands(self) -> Dict[str, Command]:
+        """
+        Carga los comandos desde config.json o usa los defaults.
+        La propiedad se cachea para evitar múltiples lecturas.
+        """
+        if self._commands_cache is not None:
+            return self._commands_cache
+        
+        # Obtener comandos por defecto
+        default_commands = self._get_default_commands()
+        
+        # Intentar cargar desde config.json usando FileUtils
+        self._commands_cache = FileUtils.load_commands_from_json(
+            json_path=self.config_json,
+            command_class=Command,
+            default_commands=default_commands
+        )
+        
+        if self._commands_cache:
+            self.log.comentario("INFO", f"✅ Cargados {len(self._commands_cache)} comandos")
+        else:
+            self._commands_cache = default_commands
+            self.log.comentario("INFO", "📝 Usando comandos por defecto")
+        
+        return self._commands_cache
+
+    @property
+    def speech_arg(self) -> str:
+
+        value = FileUtils.get_config_value(
+            self.config_json, 
+            "speech.commands"
+        )
+        if value is not None:
+            return value
+         
+        return self._get_default_commands()
     
     def get_chrome_paths(self) -> list:
         """
@@ -86,3 +123,18 @@ class Config:
                 remove(cookies_path)
             except Exception:
                 pass
+
+    def _get_default_commands(self) -> Dict[str, Command]:
+        """Comandos por defecto del sistema (fallback)"""
+        return {
+            "saluda": Command(
+                trigger_words=["saluda", "saludar", "hola", "dime hola"],
+                action="/saluda",
+                description="Saluda al bot"
+            ),
+            "reproduce": Command(
+                trigger_words=["reproduce", "pon", "toca", "play", "reproducir", "pon música"],
+                action="/play",
+                description="Reproduce música (ej: 'reproduce lofi')"
+            )
+        }

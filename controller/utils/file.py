@@ -1,6 +1,8 @@
-from os import makedirs, path as os_path, access, X_OK, listdir
 from json import load, dump
 from platform import system as platform_system
+from os import makedirs, path as os_path, access, X_OK, listdir
+from typing import Dict, Any
+from dataclasses import is_dataclass, asdict
 
 class FileUtils:
 
@@ -130,3 +132,99 @@ class FileUtils:
             return value
         except (KeyError, TypeError):
             return default
+        
+    @staticmethod
+    def transform_json_to_commands(commands_data: dict, command_class) -> Dict[str, Any]:
+        """
+        Transforma un diccionario del JSON en objetos Command.
+        
+        Args:
+            commands_data: Diccionario con datos de comandos del JSON
+            command_class: Clase Command a instanciar (para evitar import circular)
+        
+        Returns:
+            Diccionario con nombre_comando: objeto_command
+        
+        Ejemplo:
+            commands = FileUtils.transform_json_to_commands(data, Command)
+        """
+        commands = {}
+        
+        if not commands_data or not isinstance(commands_data, dict):
+            return commands
+        
+        for cmd_name, cmd_data in commands_data.items():
+            try:
+                # Validar datos mínimos requeridos
+                if not cmd_data.get("trigger_words"):
+                    continue
+                
+                commands[cmd_name] = command_class(
+                    trigger_words=cmd_data.get("trigger_words", []),
+                    action=cmd_data.get("action", f"/{cmd_name}"),
+                    description=cmd_data.get("description", f"Comando {cmd_name}"),
+                    parameters=cmd_data.get("parameters")
+                )
+            except Exception as e:
+                # Logging podría ser opcional aquí
+                print(f"Error cargando comando {cmd_name}: {e}")
+        
+        return commands
+    
+    @staticmethod
+    def transform_commands_to_json(commands: dict) -> dict:
+        """
+        Transforma objetos Command a diccionario para guardar en JSON.
+        
+        Args:
+            commands: Diccionario de comandos (nombre: objeto Command)
+        
+        Returns:
+            Diccionario listo para serializar a JSON
+        """
+        export_data = {}
+        
+        for cmd_name, cmd in commands.items():
+            if is_dataclass(cmd):
+                # Convertir dataclass a dict
+                cmd_dict = asdict(cmd)
+            elif isinstance(cmd, dict):
+                cmd_dict = cmd
+            else:
+                # Intentar acceder a atributos
+                cmd_dict = {
+                    "trigger_words": getattr(cmd, "trigger_words", []),
+                    "action": getattr(cmd, "action", ""),
+                    "description": getattr(cmd, "description", ""),
+                    "parameters": getattr(cmd, "parameters", None)
+                }
+            
+            export_data[cmd_name] = cmd_dict
+        
+        return export_data
+    
+    @staticmethod
+    def load_commands_from_json(json_path: str, command_class, default_commands: dict = None) -> Dict[str, Any]:
+        """
+        Carga comandos desde un archivo JSON, con fallback a comandos por defecto.
+        
+        Args:
+            json_path: Ruta al archivo JSON
+            command_class: Clase Command a instanciar
+            default_commands: Comandos por defecto si no hay archivo o está vacío
+        
+        Returns:
+            Diccionario de comandos cargados
+        """
+        # Leer el JSON completo
+        data = FileUtils.read_json(json_path)
+        
+        # Extraer comandos usando get_config_value anidado
+        commands_data = FileUtils.get_config_value(json_path, "speech.commands")
+        
+        if commands_data:
+            # Transformar usando el método anterior
+            return FileUtils.transform_json_to_commands(commands_data, command_class)
+        
+        # Fallback a comandos por defecto
+        return default_commands or {}

@@ -208,7 +208,6 @@ async def init_browser(config: Config):
 
     await context.add_init_script(stealth_script)
     
-
     await context.set_extra_http_headers({
         'Accept-Language': 'es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7',
         'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Brave";v="122"',
@@ -299,11 +298,7 @@ async def main():
             if button_count > 0:
                 await page.keyboard.press('M')
 
-            # ✅ Corrección crítica: config.headless es string, no booleano
-            if config.headless.lower() == 'false':
-                input("⏸️ Presiona Enter para buscar otro video o salir...")
-            else:
-                input("⏸️ [HEADLESS] Presiona Enter para continuar...")
+            input("⏸️ Presiona Enter para buscar otro video o salir..." if config.headless.lower() == 'false' else "⏸️ [HEADLESS] Presiona Enter para continuar...")
 
             next_action = input("🔁 ¿Buscar otro video? (Enter=Sí / q=Salir): ").strip()
             if next_action.lower() == 'q':

@@ -1,7 +1,12 @@
 # ===========================================================================
 # Importe de clases/librerias necesarias
 # ===========================================================================
-from requests import exceptions, post
+from pathlib import Path
+from typing import Optional
+
+from requests import post
+from controller.SpeechToCommand import SpeechToCommand
+from aiohttp import ClientSession
 
 class NotificadorTelegram:
     """
@@ -22,63 +27,40 @@ class NotificadorTelegram:
         self.__asuntoNotificacion = "🔔 Alerta Bot"
         self.api_url = "https://api.telegram.org/bot"
         self.token = self.config.telegram_token
-        self.chat_id = self.config.telegram_chat  
+        self.chat_id = self.config.telegram_chat
+        self.speech_cmd = SpeechToCommand(config)  
         
         if not self.token or not self.chat_id:  
             print("⚠️  Advertencia: Token o Chat ID de Telegram no configurados")
     
-    def __enviar_peticion(self, metodo: str, datos: dict) -> dict:
+    async def enviar_mensaje(self, mensaje: str, formato: str = 'HTML', silencioso: bool = False):
         """
-        Método privado para enviar peticiones a la API de Telegram
-        
-        Args:
-            metodo (str): Método de la API (sendMessage, sendDocument, etc.)
-            datos (dict): Datos a enviar en la petición
-            
-        Returns:
-            dict: Respuesta de la API
+        Envía un mensaje de texto a Telegram (VERSIÓN ASÍNCRONA)
         """
-        if not self.token:
-            raise Exception("❌ Token de Telegram no configurado")
-            
-        url = f"{self.api_url}{self.token}/{metodo}"
-        
-        try:
-            response = post(url, data=datos, timeout=30)
-            response.raise_for_status()
-            return response.json()
-        except exceptions.RequestException as e:
-            raise Exception(f"❌ Error en petición a Telegram: {str(e)}")
-    
-    def enviar_mensaje(self, mensaje: str, formato: str = 'HTML', silencioso: bool = False):
-        """
-        Envía un mensaje de texto a Telegram
-        
-        Args:
-            mensaje (str): Texto del mensaje a enviar
-            formato (str): Formato del mensaje ('HTML' o 'Markdown')
-            silencioso (bool): True para enviar sin notificación sonora
-            
-        Returns:
-            dict: Respuesta de la API
-        """
-        if not self.chat_id:  
+        if not self.chat_id:
             raise Exception("❌ Chat ID de Telegram no configurado")
         
         datos = {
-            'chat_id': self.chat_id,  
+            'chat_id': self.chat_id,
             'text': mensaje,
             'parse_mode': formato,
             'disable_notification': silencioso
         }
         
         try:
-            respuesta = self.__enviar_peticion('sendMessage', datos)
+            # Usar versión asíncrona de requests o mantener síncrono pero sin await
+            url = f"{self.api_url}{self.token}/sendMessage"
+            
+            async with ClientSession() as session:
+                async with session.post(url, data=datos, timeout=30) as response:
+                    respuesta = await response.json()
+                    
             if hasattr(self.config, 'log'):
                 self.config.log.comentario("SUCCESS", "✅ Mensaje de Telegram enviado")
             else:
                 print("✅ Mensaje de Telegram enviado exitosamente")
             return respuesta
+            
         except Exception as e:
             if hasattr(self.config, 'log'):
                 self.config.log.error(f"Error enviando mensaje a Telegram: {str(e)}", "Telegram")
@@ -227,3 +209,38 @@ class NotificadorTelegram:
         else:
             mensaje = "❌ **Error en el scraper**\n\nAún no se ha generado certificado"
             self.enviar_mensaje(mensaje, formato='Markdown')
+
+    async def handle_audio_message(self, audio_file_path: str) -> Optional[str]:
+        """
+        Procesa un archivo de audio y retorna el comando detectado
+        """
+        self.config.log.comentario("INFO", f"🎤 Procesando audio: {audio_file_path}")
+        
+        # Verificar tamaño del archivo (máximo 10MB para API gratuita)
+        file_size = Path(audio_file_path).stat().st_size
+        if file_size > 10 * 1024 * 1024:  # 10MB
+            self.config.log.comentario("INFO", f"⚠️ Audio muy grande: {file_size} bytes")
+            return None
+        
+        # Transcribir y obtener comando
+        command = self.speech_cmd.process_audio_to_command(audio_file_path)
+        
+        if command:
+            self.config.log.comentario("INFO", f"✅ Comando generado: {command}")
+            await self.execute_voice_command(command)
+            return command
+        else:
+            self.config.log.comentario("INFO", "❌ No se generó ningún comando")
+            return None
+    
+    async def execute_voice_command(self, command: str):
+        """Ejecuta comandos generados por voz"""
+        if command == "/saluda":
+            await self.enviar_mensaje("¡Hola! 👋 ¿Cómo estás?")
+        elif command == "/help":
+            await self.send_help()
+        elif command == "/play":
+            await self.enviar_mensaje("🎵 Reproduciendo música...")
+            # Tu lógica de reproducción aquí
+        elif command.startswith("/volume"):
+            await self.enviar_mensaje(f"🔊 {command}")          
