@@ -150,12 +150,8 @@ class Config:
     
     @property
     def youtube_dict(self) -> str:
-
         value = FileUtils.get_config_value(
             self.config_json, 
             "youtube.xpath"
         )
-        if value is not None:
-            return value
-         
-        return self._get_default_xpath()
+        return self._get_default_xpath() if value is None or not isinstance(value, dict) or len(value) == 0 else value
