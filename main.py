@@ -289,8 +289,8 @@ async def main():
             
             await page.wait_for_load_state("domcontentloaded")
             await asy_sleep(uniform(0.3, 0.7))
-            
-            volume_button = page.locator("xpath=//button[@class='ytp-volume-icon ytp-button' and (starts-with(@data-tooltip-title, 'Unmute') or @data-tooltip-title='Unmute (m)')]")
+
+            volume_button = page.locator(f"xpath={config.youtube_dict['icon_volumen']}")
             await asy_sleep(uniform(0.5, 0.1))
 
             button_count = await volume_button.count()

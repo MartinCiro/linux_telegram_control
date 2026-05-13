@@ -31,7 +31,7 @@ class Config:
         self.log = Log()
 
         self._commands_cache: Optional[Dict[str, Command]] = None
-
+    
     @property
     def youtube_query(self) -> str:
 
@@ -138,3 +138,24 @@ class Config:
                 description="Reproduce música (ej: 'reproduce lofi')"
             )
         }
+    
+    def _get_default_xpath(self) -> Dict[str, Command]:
+        """Xpath por defecto del sistema (fallback)"""
+        return {
+            "icon_volumen": "//button[@class='ytp-volume-icon ytp-button' and (starts-with(@data-tooltip-title, 'Unmute') or @data-tooltip-title='Unmute (m)')]",
+            "input_search": "//input[@name='search_query']",
+            "first_video": "//ytd-video-renderer",
+            "btn_acp_cookies": "//button[contains(., 'Aceptar') or contains(., 'Accept') or contains(., 'Aceptar todas')]"
+        }
+    
+    @property
+    def youtube_dict(self) -> str:
+
+        value = FileUtils.get_config_value(
+            self.config_json, 
+            "youtube.xpath"
+        )
+        if value is not None:
+            return value
+         
+        return self._get_default_xpath()

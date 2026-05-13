@@ -1,19 +1,12 @@
 # controller/YoutubePlayer.py
 from asyncio import sleep as asy_slp
-import logging
 from random import uniform
-from logging import getLogger
 
 class YoutubePlayer:
     """
     YouTube Player con Playwright - Compatible con Config minimalista.
     ✅ Page inyectada, ✅ Logger flexible, ✅ Sin dependencias de config.log
     """
-    
-    # 🎯 XPaths (ajustables si YouTube cambia su DOM)
-    XPATH_SEARCH_BOX = "//input[@name='search_query']"
-    XPATH_FIRST_VIDEO = "//ytd-video-renderer//a[@id='video-title'][1]"
-    XPATH_COOKIE_ACCEPT = "//button[contains(., 'Aceptar') or contains(., 'Accept') or contains(., 'Aceptar todas')]"
 
     def __init__(self, config, page):
         """
@@ -24,17 +17,20 @@ class YoutubePlayer:
         """
         self.config = config
         self.page = page
+        self.search_box = self.config.youtube_dict['input_search']
+        self.xpath_first_vd = self.config.youtube_dict['first_video']
+        self.xpath_cookie_acpt = self.config.youtube_dict['btn_acp_cookies']
 
     async def _accept_cookies_if_needed(self):
         """Cierra banner de cookies si aparece (no fatal si falla)"""
         try:
-            locator = self.page.locator(f'xpath={YoutubePlayer.XPATH_COOKIE_ACCEPT}')
+            locator = self.page.locator(f'xpath={self.xpath_cookie_acpt}')
             if await locator.count() > 0:
                 await locator.click(timeout=3000, delay=50)
                 await asy_slp(uniform(0.3, 0.7))
                 self.config.log.comentario("DEBUG", "🍪 Banner de cookies cerrado")
         except Exception:
-            pass  # No es crítico
+            pass
         
     async def search(self, query: str = None, limit: int = 5) -> list:
         """
@@ -54,20 +50,20 @@ class YoutubePlayer:
             await asy_slp(uniform(0.5, 1.2))
             await self._accept_cookies_if_needed()
             
-            search_box = self.page.locator(f'xpath={YoutubePlayer.XPATH_SEARCH_BOX}')
+            search_box = self.page.locator(f'xpath={self.search_box}')
             await search_box.fill(yt_query, timeout=5000)
             await asy_slp(uniform(0.2, 0.4))
             await search_box.press("Enter", delay=50)
             
             # Esperar resultados
-            await self.page.wait_for_selector('ytd-video-renderer', timeout=10000)
+            await self.page.wait_for_selector(f'{self.xpath_first_vd}', timeout=10000)
             await asy_slp(uniform(0.8, 1.5))
             
             results = []
             for i in range(limit):
                 try:
                     # Usar xpath más específico para evitar duplicados
-                    video_element = self.page.locator(f'xpath=(//ytd-video-renderer)[{i+1}]')
+                    video_element = self.page.locator(f'xpath=({self.xpath_first_vd})[{i+1}]')
                     if await video_element.count() == 0:
                         continue
                     
