@@ -242,7 +242,7 @@ async def play_youtube_interactive(config: Config, page) -> bool:
     # 1. Buscar y mostrar resultados
     query = config.youtube_query
     results = await yt.search(query)
-    
+    # print(results) # Lista de obj
     if not results:
         print("❌ No se encontraron resultados")
         return False
