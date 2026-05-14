@@ -155,3 +155,11 @@ class Config:
             "youtube.xpath"
         )
         return self._get_default_xpath() if value is None or not isinstance(value, dict) or len(value) == 0 else value
+    
+    @property
+    def user_browser_directory(self) -> str:
+        value = FileUtils.get_config_value(
+            self.config_json, 
+            "browser_user_directory"
+        )
+        return "~/.config/BraveSoftware/Brave-Browser-Playwright" if value is None or not isinstance(value, str) or value.strip() == "" else value

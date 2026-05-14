@@ -2,11 +2,12 @@ from sys import exit
 from asyncio import sleep as asy_sleep, run as run_asy
 from traceback import print_exc
 from playwright.async_api import async_playwright
+from os import path as os_path
+from random import uniform
 
 from controller.Config import Config
 from controller.YoutubePlayer import YoutubePlayer
-from os import path as os_path
-from random import uniform
+from controller.utils.screen_utils import ScreenUtils
 
 async def ensure_first_tab(context, config):
     """
@@ -36,7 +37,7 @@ async def init_browser(config: Config):
     """Inicializa Playwright con técnicas avanzadas de stealth."""
     
     playwright = await async_playwright().start()
-    user_data_dir = os_path.expanduser("~/.config/BraveSoftware/Brave-Browser-Playwright")
+    user_data_dir = os_path.expanduser(config.user_browser_directory)
     if not os_path.exists(user_data_dir):
         os_path.makedirs(user_data_dir, exist_ok=True)
     
@@ -45,6 +46,8 @@ async def init_browser(config: Config):
         config.log.comentario("ERROR", "No se encontró la ruta de Brave.")
         return None
     
+    screen_w, screen_h = ScreenUtils.get_screen_size()
+
     # Configuración optimizada de argumentos
     launch_options = {
         'headless': config.headless.lower() == 'true',
@@ -56,10 +59,6 @@ async def init_browser(config: Config):
             # Anti-detección de automatización (Chromium/Playwright)
             '--disable-blink-features=AutomationControlled',
             '--disable-features=IsolateOrigins,site-per-process,AutomationControlled',
-            
-            # Ventana y viewport consistente
-            '--window-size=1920,1080',
-            '--viewport-size=1920,1080',
             
             # Limpieza de huellas de automatización
             '--disable-infobars',
@@ -188,11 +187,6 @@ async def init_browser(config: Config):
             };
         }
         
-        // 7. Screen y hardware coherentes con viewport 1920x1080
-        Object.defineProperty(screen, 'width', { get: () => 1920, configurable: true });
-        Object.defineProperty(screen, 'height', { get: () => 1080, configurable: true });
-        Object.defineProperty(screen, 'availWidth', { get: () => 1920, configurable: true });
-        Object.defineProperty(screen, 'availHeight', { get: () => 1080, configurable: true });
         Object.defineProperty(screen, 'colorDepth', { get: () => 24, configurable: true });
         Object.defineProperty(screen, 'pixelDepth', { get: () => 24, configurable: true });
         
@@ -216,6 +210,9 @@ async def init_browser(config: Config):
     })
 
     page = context.pages[0] if context.pages else await context.new_page()
+    
+    await page.set_viewport_size({'width': screen_w, 'height': screen_h})
+    
     page = await ensure_first_tab(context, config) if context.pages else await context.new_page()
     
     config.log.comentario("INFO", "🌐 Navegador Brave iniciado con stealth mejorado.")
@@ -235,6 +232,65 @@ async def play_youtube(config: Config, page, query: str = None) -> int:
     
     return 0 if success else 1
 
+async def navigate_to_video_with_retry(page, url: str, title: str, max_retries: int = 3) -> bool:
+    """
+    Navega a una URL de YouTube con sistema de reintentos.
+    
+    Args:
+        page: Objeto page de Playwright
+        url: URL del video
+        title: Título del video (para logs)
+        max_retries: Número máximo de intentos
+    
+    Returns:
+        bool: True si se navegó exitosamente, False si falló
+    """
+    last_error = None
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            if attempt > 1:
+                await asy_sleep(2 ** (attempt - 1))
+            
+            # Navegar al video
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            
+            # Esperar que el elemento video esté presente
+            await page.wait_for_selector('video', timeout=10000)
+            
+            # Tiempo para que YouTube inicialice su player interno
+            await asy_sleep(1.5)
+            
+            # Verificar que el video realmente se está reproduciendo
+            try:
+                # Verificar si hay un error en la página (ej: "Video no disponible")
+                error_selector = page.locator('#error-screen, .ytd-error-message-renderer')
+                if await error_selector.count() > 0:
+                    error_text = await error_selector.first.text_content()
+                    if error_text and "no disponible" in error_text.lower():
+                        print(f"⚠️ Error en el video: {error_text[:100]}")
+                        raise Exception("Video no disponible")
+            except:
+                pass
+            
+            return True
+            
+        except Exception as e:
+            last_error = e
+            error_msg = str(e)
+            
+            # Verificar si es timeout o error de navegación
+            if "Timeout" in error_msg or "timeout" in error_msg.lower():
+                
+                if attempt == max_retries:
+                    return False
+                continue
+            else:
+                # Error diferente (ej: URL inválida, video no disponible)
+                return False
+    
+    return False
+
 # 🔹 Búsqueda interactiva: usuario elige el video
 async def play_youtube_interactive(config: Config, page) -> bool:    
     yt = YoutubePlayer(config, page)
@@ -242,7 +298,7 @@ async def play_youtube_interactive(config: Config, page) -> bool:
     # 1. Buscar y mostrar resultados
     query = config.youtube_query
     results = await yt.search(query)
-    # print(results) # Lista de obj
+    
     if not results:
         print("❌ No se encontraron resultados")
         return False
@@ -259,16 +315,23 @@ async def play_youtube_interactive(config: Config, page) -> bool:
         
         idx = int(choice) - 1
         if 0 <= idx < len(results):
-            # 1️⃣ Navegar al video (SOLO domcontentloaded)
-            await page.goto(results[idx]["url"], wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_selector('video', timeout=10000)
-            await asy_sleep(1.5)  # Tiempo para que YouTube inicialice su player interno
+            selected_video = results[idx]
+            video_url = selected_video["url"]
+            video_title = selected_video["title"]
             
-            print(f"✅ Reproduciendo: {results[idx]['title']}")
-            return True
+            # 3️⃣ Reproducir video CON REINTENTOS (máximo 3 intentos)
+            success = await navigate_to_video_with_retry(page, video_url, video_title, max_retries=3)
+            
+            if success:
+                print(f"✅ Reproduciendo: {video_title}")
+                return True
+            else:
+                print(f"❌ No se pudo cargar el video después de 3 intentos")
+                return False
         else:
             print("❌ Opción inválida")
             return False
+            
     except ValueError:
         print("❌ Entrada inválida")
         return False

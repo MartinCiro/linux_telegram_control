@@ -52,5 +52,6 @@
                 "description": "Busca contenido (ej: 'buscar rock')"
             }
         }
-    }
+    },
+    "browser_user_directory": "~/.config/BraveSoftware/Brave-Browser-Playwright"
 }
