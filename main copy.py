@@ -1,7 +1,7 @@
 # main.py - Bot de Telegram que escucha audios (CORREGIDO)
 from pathlib import Path
 from sys import exit
-from asyncio import run as run_asy, sleep
+from asyncio import sleep, run as run_asy
 from traceback import print_exc
 
 # Importar la librería correcta
