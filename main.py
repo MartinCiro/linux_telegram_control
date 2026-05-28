@@ -2,7 +2,7 @@ from sys import exit
 from asyncio import sleep as asy_sleep, run as run_asy
 from traceback import print_exc
 from playwright.async_api import async_playwright
-from os import path as os_path
+from os import name as os_name, path as os_path
 from random import uniform
 
 from controller.Config import Config
@@ -34,7 +34,7 @@ async def ensure_first_tab(context, config):
     return page
 
 async def init_browser(config: Config):
-    """Inicializa Playwright con técnicas avanzadas de stealth."""
+    """Inicializa Brave con anti-detección y bloqueador de anuncios funcional."""
     
     playwright = await async_playwright().start()
     user_data_dir = os_path.expanduser(config.user_browser_directory)
@@ -48,176 +48,105 @@ async def init_browser(config: Config):
     
     screen_w, screen_h = ScreenUtils.get_screen_size()
 
-    # Configuración optimizada de argumentos
+    # Configuración clave para Brave con anti-detección
     launch_options = {
         'headless': config.headless.lower() == 'true',
         'executable_path': brave_exec,
         'args': [
-            # Sandbox y rendimiento
-            '--disable-dev-shm-usage',
-            
-            # Anti-detección de automatización (Chromium/Playwright)
+            # Anti-detección fundamental
             '--disable-blink-features=AutomationControlled',
             '--disable-features=IsolateOrigins,site-per-process,AutomationControlled',
             
-            # Limpieza de huellas de automatización
+            # Mantener funcionalidad de Brave Shields
+            # NO usar '--disable-brave-component-updates' si quieres bloqueo de anuncios
+            
+            # Configuración de rendimiento
+            '--disable-dev-shm-usage',
+            
+            # Ocultar automatización (pero conservando funcionalidad de bloqueo)
             '--disable-infobars',
-            '--disable-extensions',
-            '--disable-component-update',
-            '--no-first-run',
-            '--disable-default-apps',
-            '--disable-sync',
-            '--disable-background-timer-throttling',
-            '--disable-backgrounding-occluded-windows',
-            '--disable-renderer-backgrounding',
-            '--disable-ipc-flooding-protection',
             
-            # Configuración de medios y autoplay
+            # Cargar extenciones
+            #'--disable-extensions-except=/path/to/ublock',
+            
+            # Autoplay y medios
             '--autoplay-policy=no-user-gesture-required',
-            '--enable-features=MediaRouter',
             
-            # Idioma y regionalización
+            # Idioma
             '--lang=es-ES',
             '--accept-lang=es-ES,es,en-US,en',
-            
-            # Brave-specific: desactivar shields para evitar conflictos con fingerprinting
-            '--disable-brave-component-updates',
         ],
-        'ignore_default_args': ['--enable-automation'], 
+        'ignore_default_args': ['--enable-automation', '--disable-extensions'],
     }
     
-    # Crear contexto
+    # Crear contexto con perfil persistente
     context = await playwright.chromium.launch_persistent_context(
         user_data_dir=user_data_dir,
         **launch_options
     )
 
+    # Script stealth más limpio (sin conflictos con Brave Shields)
     stealth_script = """
-        // 1. Eliminar webdriver de forma segura para Playwright
+        // Eliminar webdriver - Método más compatible
+        delete Object.getPrototypeOf(navigator).webdriver;
         Object.defineProperty(navigator, 'webdriver', {
             get: () => undefined,
             configurable: true
         });
         
-        // 2. Simular window.chrome real (estructura mínima que esperan los detectores)
-        if (!window.navigator.chrome) {
-            window.navigator.chrome = {
-                runtime: {},
-                loadTimes: function() { return {}; },
-                csi: function() { return {}; },
-                connection: function() { return { type: 'wifi', downlink: 10, rtt: 50 }; }
-            };
-        }
-        
-        // 3. Plugins realistas con Prototype correcto
-        const mockPlugins = {
-            length: 3,
-            item: function(index) { return this[index] || null; },
-            namedItem: function(name) { return this[name] || null; },
-            refresh: function() { return []; },
-            0: {
-                name: 'Chrome PDF Plugin',
-                filename: 'internal-pdf-viewer',
-                description: 'Portable Document Format',
-                version: '1.0.0.0',
-                length: 0,
-                item: function() { return null; },
-                namedItem: function() { return null; }
-            },
-            1: {
-                name: 'Chrome PDF Viewer',
-                filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai',
-                description: 'Portable Document Format',
-                version: '1.0.0.0',
-                length: 0,
-                item: function() { return null; },
-                namedItem: function() { return null; }
-            },
-            2: {
-                name: 'Native Client',
-                filename: 'internal-nacl-plugin',
-                description: '',
-                version: '1.0.0.0',
-                length: 0,
-                item: function() { return null; },
-                namedItem: function() { return null; }
-            }
-        };
-        Object.setPrototypeOf(mockPlugins, PluginArray.prototype);
-        Object.defineProperty(navigator, 'plugins', {
-            get: () => mockPlugins,
-            configurable: true
-        });
-        
-        // 4. Idiomas coherentes con el locale del sistema
-        Object.defineProperty(navigator, 'languages', {
-            get: () => ['es-ES', 'es', 'en-US', 'en'],
-            configurable: true
-        });
-        Object.defineProperty(navigator, 'language', {
-            get: () => 'es-ES',
-            configurable: true
-        });
-        
-        // 5. Parchear Function.toString para evitar detección de código inyectado
-        const nativeToString = Function.prototype.toString;
-        const nativeHasOwnProperty = Object.prototype.hasOwnProperty;
-        
-        Function.prototype.toString = function() {
-            if (nativeHasOwnProperty.call(this, 'name') && this.name === 'get webdriver') {
-                return 'function get webdriver() { [native code] }';
-            }
-            return nativeToString.call(this);
-        };
-        
-        // 6. Permisos silenciosos (evita prompts que delatan automatización)
-        const originalQuery = window.navigator.permissions?.query;
-        if (originalQuery) {
-            window.navigator.permissions.query = function(parameters) {
-                if (parameters.name === 'notifications') {
-                    return Promise.resolve({
-                        state: Notification.permission || 'default',
-                        onchange: null,
-                        addEventListener: function() {},
-                        removeEventListener: function() {},
-                        dispatchEvent: function() { return false; }
-                    });
+        // Simular chrome.runtime (Brave lo tiene nativo)
+        if (!window.chrome) {
+            window.chrome = {
+                runtime: {
+                    id: 'fake-id',
+                    connect: () => {},
+                    sendMessage: () => {}
                 }
-                return originalQuery.apply(this, arguments);
             };
         }
         
-        Object.defineProperty(screen, 'colorDepth', { get: () => 24, configurable: true });
-        Object.defineProperty(screen, 'pixelDepth', { get: () => 24, configurable: true });
+        // Plugins realistas (NO sobrescribir si ya existen)
+        if (!navigator.plugins || navigator.plugins.length === 0) {
+            const plugins = {
+                0: { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+                1: { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+                2: { name: 'Native Client', filename: 'internal-nacl-plugin' },
+                length: 3
+            };
+            Object.setPrototypeOf(plugins, PluginArray.prototype);
+            Object.defineProperty(navigator, 'plugins', { get: () => plugins });
+        }
         
-        // 8. Hardware concurrency y deviceMemory realistas para un i5/Ryzen moderno
-        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8, configurable: true });
-        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8, configurable: true });
+        // Idioma consistente
+        Object.defineProperty(navigator, 'languages', { get: () => ['es-ES', 'es', 'en'] });
         
-        // 9. Eliminar propiedades de Playwright que puedan delatar
+        // Hardware moderno
+        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+        
+        // Limpiar rastros de Playwright
         delete window.__playwright;
         delete window.__pw_manual;
-        delete window.__PW_inspect;
     """
 
     await context.add_init_script(stealth_script)
     
+    # Headers HTTP más realistas
     await context.set_extra_http_headers({
-        'Accept-Language': 'es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Brave";v="122"',
+        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+        'Sec-Ch-Ua': '"Brave";v="122", "Not:A-Brand";v="24", "Chromium";v="122"',
         'Sec-Ch-Ua-Mobile': '?0',
-        'Sec-Ch-Ua-Platform': '"Linux"'
+        'Sec-Ch-Ua-Platform': '"Windows"' if os_name == 'nt' else '"Linux"',
     })
 
+    # Obtener o crear página
     page = context.pages[0] if context.pages else await context.new_page()
-    
     await page.set_viewport_size({'width': screen_w, 'height': screen_h})
-    
+
     page = await ensure_first_tab(context, config) if context.pages else await context.new_page()
-    
-    config.log.comentario("INFO", "🌐 Navegador Brave iniciado con stealth mejorado.")
-    
-    return playwright, context.browser, page 
+
+    config.log.comentario("INFO", "🌐 Navegador Brave iniciado con stealth mejorado.")    
+    return playwright, context.browser, page
 
 async def play_youtube(config: Config, page, query: str = None) -> int:
     """Wrapper que retorna código de salida (0=éxito, 1=error)"""
