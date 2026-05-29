@@ -18,7 +18,8 @@
             "reproduce": {
                 "trigger_words": ["reproduce", "pon", "toca", "play", "reproducir", "pon música"],
                 "action": "/play",
-                "description": "Reproduce música"
+                "description": "Reproduce música",
+                "parameters": {"type": "query"}
             },
             "pausa": {
                 "trigger_words": ["pausa", "pausar", "detén", "para", "detener"],

@@ -6,6 +6,10 @@ from typing import Optional
 
 from requests import post
 from controller.SpeechToCommand import SpeechToCommand
+from controller.YoutubePlayer import YoutubePlayer
+from controller.BrowserManager import BrowserManager
+from controller.CommandExecutor import CommandExecutor
+
 from aiohttp import ClientSession
 
 class NotificadorTelegram:
@@ -16,19 +20,19 @@ class NotificadorTelegram:
     Recibe la configuración por inyección de dependencias.
     """
     
-    def __init__(self, config):  
+    def __init__(self, config, browser_manager): 
         """
         Constructor con inyección de configuración
         
         Args:
             config: Instancia de Config con las credenciales de Telegram
         """
-        self.config = config  
-        self.__asuntoNotificacion = "🔔 Alerta Bot"
+        self.config = config
         self.api_url = "https://api.telegram.org/bot"
         self.token = self.config.telegram_token
         self.chat_id = self.config.telegram_chat
-        self.speech_cmd = SpeechToCommand(config)  
+        self.speech_cmd = SpeechToCommand(config)
+        self.executor = CommandExecutor(config, browser_manager)
         
         if not self.token or not self.chat_id:  
             print("⚠️  Advertencia: Token o Chat ID de Telegram no configurados")
@@ -226,21 +230,9 @@ class NotificadorTelegram:
         command = self.speech_cmd.process_audio_to_command(audio_file_path)
         
         if command:
-            self.config.log.comentario("INFO", f"✅ Comando generado: {command}")
-            await self.execute_voice_command(command)
+            self.config.log.comentario("INFO", f"✅ Comando detectado: {command}")
+            result = await self.executor.execute(command)
+            # 👇 Solo notificar el resultado
+            await self.enviar_mensaje(result["message"])
             return command
-        else:
-            self.config.log.comentario("INFO", "❌ No se generó ningún comando")
-            return None
-    
-    async def execute_voice_command(self, command: str):
-        """Ejecuta comandos generados por voz"""
-        if command == "/saluda":
-            await self.enviar_mensaje("¡Hola! 👋 ¿Cómo estás?")
-        elif command == "/help":
-            await self.send_help()
-        elif command == "/play":
-            await self.enviar_mensaje("🎵 Reproduciendo música...")
-            # Tu lógica de reproducción aquí
-        elif command.startswith("/volume"):
-            await self.enviar_mensaje(f"🔊 {command}")          
+        return None

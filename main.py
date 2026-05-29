@@ -1,316 +1,157 @@
 from sys import exit
-from asyncio import sleep as asy_sleep, run as run_asy
+from asyncio import sleep, run as run_asy
 from traceback import print_exc
-from playwright.async_api import async_playwright
-from os import name as os_name, path as os_path
-from random import uniform
+from tempfile import NamedTemporaryFile
+from pathlib import Path
+
+from telegram.ext import Application, MessageHandler, CommandHandler, filters
+from telegram import Update
+from telegram.ext import ContextTypes
 
 from controller.Config import Config
-from controller.YoutubePlayer import YoutubePlayer
-from controller.utils.screen_utils import ScreenUtils
+from controller.NotificadorTelegram import NotificadorTelegram
+from controller.BrowserManager import BrowserManager
 
-async def ensure_first_tab(context, config):
-    """
-    Asegura que la primera pestaña esté activa y limpia.
-    Retorna la página de la primera pestaña.
-    """
-    if len(context.pages) == 0:
-        # No hay páginas, crear una nueva
-        page = await context.new_page()
-        config.log.comentario("INFO", "📑 Creada nueva pestaña principal")
-    else:
-        # Usar la primera pestaña existente
-        page = context.pages[0]
-        config.log.comentario("INFO", f"📑 Usando pestaña principal (Total: {len(context.pages)} pestañas)")
+# Variable global
+notificador = None
+
+async def handle_telegram_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manejador para mensajes de audio en Telegram"""
+    global notificador
+    
+    if not update.message.audio:
+        await update.message.reply_text("❌ Envíame un archivo de audio")
+        return
+    
+    await update.message.reply_text("🎤 Recibido audio. Procesando comando...")
+    
+    audio_file = await update.message.audio.get_file()
+    
+    with NamedTemporaryFile(suffix='.ogg', delete=False) as tmp:
+        await audio_file.download_to_drive(tmp.name) 
+        audio_path = tmp.name
+    
+    try:
+        command = await notificador.handle_audio_message(audio_path)
         
-        # Si hay más pestañas, cerrarlas opcionalmente
-        if len(context.pages) > 1:
-            config.log.comentario("INFO", f"🧹 Cerrando {len(context.pages)-1} pestañas adicionales")
-            for i in range(len(context.pages) - 1, 0, -1):
-                await context.pages[i].close()
-    
-    # Asegurar que la página esté activa
-    await page.bring_to_front()
-    return page
+        if not command:
+            await update.message.reply_text("❌ No entendí el comando en el audio")
+        else:
+            pass
+            
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error al procesar audio: {str(e)}")
+        print(f"Error: {e}")
+    finally:
+        Path(audio_path).unlink(missing_ok=True)  
 
-async def init_browser(config: Config):
-    """Inicializa Brave con anti-detección y bloqueador de anuncios funcional."""
+async def handle_telegram_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manejador para notas de voz"""
+    global notificador
     
-    playwright = await async_playwright().start()
-    user_data_dir = os_path.expanduser(config.user_browser_directory)
-    if not os_path.exists(user_data_dir):
-        os_path.makedirs(user_data_dir, exist_ok=True)
+    if not update.message.voice:
+        await update.message.reply_text("❌ Envíame una nota de voz")
+        return
     
-    brave_exec = config.get_chrome_path()
-    if not brave_exec:
-        config.log.comentario("ERROR", "No se encontró la ruta de Brave.")
-        return None
+    await update.message.reply_text("🎤 Recibida nota de voz. Procesando...")
     
-    screen_w, screen_h = ScreenUtils.get_screen_size()
+    voice_file = await update.message.voice.get_file()
+    
+    with NamedTemporaryFile(suffix='.ogg', delete=False) as tmp:
+        await voice_file.download_to_drive(tmp.name)  
+        audio_path = tmp.name
+    
+    try:
+        command = await notificador.handle_audio_message(audio_path)
+        
+        if not command:
+            await update.message.reply_text("❌ No entendí el comando en la nota de voz")
+            
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+    finally:
+        Path(audio_path).unlink(missing_ok=True)  # ✅ FIX
 
-    # Configuración clave para Brave con anti-detección
-    launch_options = {
-        'headless': config.headless.lower() == 'true',
-        'executable_path': brave_exec,
-        'args': [
-            # Anti-detección fundamental
-            '--disable-blink-features=AutomationControlled',
-            '--disable-features=IsolateOrigins,site-per-process,AutomationControlled',
-            
-            # Mantener funcionalidad de Brave Shields
-            # NO usar '--disable-brave-component-updates' si quieres bloqueo de anuncios
-            
-            # Configuración de rendimiento
-            '--disable-dev-shm-usage',
-            
-            # Ocultar automatización (pero conservando funcionalidad de bloqueo)
-            '--disable-infobars',
-            
-            # Cargar extenciones
-            #'--disable-extensions-except=/path/to/ublock',
-            
-            # Autoplay y medios
-            '--autoplay-policy=no-user-gesture-required',
-            
-            # Idioma
-            '--lang=es-ES',
-            '--accept-lang=es-ES,es,en-US,en',
-        ],
-        'ignore_default_args': ['--enable-automation', '--disable-extensions'],
-    }
-    
-    # Crear contexto con perfil persistente
-    context = await playwright.chromium.launch_persistent_context(
-        user_data_dir=user_data_dir,
-        **launch_options
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /start"""
+    await update.message.reply_text(
+        "🎵 **Bot de YouTube + Brave**\n\n"
+        "✅ **Anti-detección activada**\n"
+        "✅ **Bloqueo de anuncios activo** (Brave Shields)\n\n"
+        "📤 **Envíame un audio o nota de voz** con comandos como:\n"
+        "• 'reproduce lofi hip hop'\n"
+        "• 'pausa'\n"
+        "• 'siguiente'\n"
+        "• 'volumen 70'\n\n"
+        "🎙️ ¡Pruébalo ahora!"
     )
 
-    # Script stealth más limpio (sin conflictos con Brave Shields)
-    stealth_script = """
-        // Eliminar webdriver - Método más compatible
-        delete Object.getPrototypeOf(navigator).webdriver;
-        Object.defineProperty(navigator, 'webdriver', {
-            get: () => undefined,
-            configurable: true
-        });
-        
-        // Simular chrome.runtime (Brave lo tiene nativo)
-        if (!window.chrome) {
-            window.chrome = {
-                runtime: {
-                    id: 'fake-id',
-                    connect: () => {},
-                    sendMessage: () => {}
-                }
-            };
-        }
-        
-        // Plugins realistas (NO sobrescribir si ya existen)
-        if (!navigator.plugins || navigator.plugins.length === 0) {
-            const plugins = {
-                0: { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
-                1: { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
-                2: { name: 'Native Client', filename: 'internal-nacl-plugin' },
-                length: 3
-            };
-            Object.setPrototypeOf(plugins, PluginArray.prototype);
-            Object.defineProperty(navigator, 'plugins', { get: () => plugins });
-        }
-        
-        // Idioma consistente
-        Object.defineProperty(navigator, 'languages', { get: () => ['es-ES', 'es', 'en'] });
-        
-        // Hardware moderno
-        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-        
-        // Limpiar rastros de Playwright
-        delete window.__playwright;
-        delete window.__pw_manual;
-    """
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /help"""
+    global notificador
+    if notificador:
+        # ✅ Delegamos al orquestador interno
+        result = await notificador.execute_command("/help")
+        await update.message.reply_text(result.get("message", "❌ Error al obtener ayuda"), parse_mode='Markdown')
+    else:
+        await update.message.reply_text("❌ Bot no inicializado correctamente")
 
-    await context.add_init_script(stealth_script)
-    
-    # Headers HTTP más realistas
-    await context.set_extra_http_headers({
-        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-        'Sec-Ch-Ua': '"Brave";v="122", "Not:A-Brand";v="24", "Chromium";v="122"',
-        'Sec-Ch-Ua-Mobile': '?0',
-        'Sec-Ch-Ua-Platform': '"Windows"' if os_name == 'nt' else '"Linux"',
-    })
-
-    # Obtener o crear página
-    page = context.pages[0] if context.pages else await context.new_page()
-    await page.set_viewport_size({'width': screen_w, 'height': screen_h})
-
-    page = await ensure_first_tab(context, config) if context.pages else await context.new_page()
-
-    config.log.comentario("INFO", "🌐 Navegador Brave iniciado con stealth mejorado.")    
-    return playwright, context.browser, page
-
-async def play_youtube(config: Config, page, query: str = None) -> int:
-    """Wrapper que retorna código de salida (0=éxito, 1=error)"""
-    yt_query = query or config.youtube_query
-    
-    yt = YoutubePlayer(config, page)
-    success = await yt.search_and_play(yt_query)
-    
-    # ✅ Mantener abierto si se configura
-    if config.headless:
-        input("⏸️ Presiona Enter para cerrar...")
-    
-    return 0 if success else 1
-
-async def navigate_to_video_with_retry(page, url: str, title: str, max_retries: int = 3) -> bool:
-    """
-    Navega a una URL de YouTube con sistema de reintentos.
-    
-    Args:
-        page: Objeto page de Playwright
-        url: URL del video
-        title: Título del video (para logs)
-        max_retries: Número máximo de intentos
-    
-    Returns:
-        bool: True si se navegó exitosamente, False si falló
-    """
-    last_error = None
-    
-    for attempt in range(1, max_retries + 1):
-        try:
-            if attempt > 1:
-                await asy_sleep(2 ** (attempt - 1))
-            
-            # Navegar al video
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            
-            # Esperar que el elemento video esté presente
-            await page.wait_for_selector('video', timeout=10000)
-            
-            # Tiempo para que YouTube inicialice su player interno
-            await asy_sleep(1.5)
-            
-            # Verificar que el video realmente se está reproduciendo
-            try:
-                # Verificar si hay un error en la página (ej: "Video no disponible")
-                error_selector = page.locator('#error-screen, .ytd-error-message-renderer')
-                if await error_selector.count() > 0:
-                    error_text = await error_selector.first.text_content()
-                    if error_text and "no disponible" in error_text.lower():
-                        print(f"⚠️ Error en el video: {error_text[:100]}")
-                        raise Exception("Video no disponible")
-            except:
-                pass
-            
-            return True
-            
-        except Exception as e:
-            last_error = e
-            error_msg = str(e)
-            
-            # Verificar si es timeout o error de navegación
-            if "Timeout" in error_msg or "timeout" in error_msg.lower():
-                
-                if attempt == max_retries:
-                    return False
-                continue
-            else:
-                # Error diferente (ej: URL inválida, video no disponible)
-                return False
-    
-    return False
-
-# 🔹 Búsqueda interactiva: usuario elige el video
-async def play_youtube_interactive(config: Config, page) -> bool:    
-    yt = YoutubePlayer(config, page)
-    
-    # 1. Buscar y mostrar resultados
-    query = config.youtube_query
-    results = await yt.search(query)
-    
-    if not results:
-        print("❌ No se encontraron resultados")
-        return False
-    
-    print(f"\n📋 Resultados para '{query}':")
-    for r in results:
-        print(f"   {r['index']}. {r['title'][:60]}{'...' if len(r['title']) > 60 else ''}")
-    
-    # 2. Pedir selección al usuario
-    try:
-        choice = input("\n👉 Elige un número (1-5) o 'q' para salir: ").strip()
-        if choice.lower() == 'q':
-            return False
-        
-        idx = int(choice) - 1
-        if 0 <= idx < len(results):
-            selected_video = results[idx]
-            video_url = selected_video["url"]
-            video_title = selected_video["title"]
-            
-            # 3️⃣ Reproducir video CON REINTENTOS (máximo 3 intentos)
-            success = await navigate_to_video_with_retry(page, video_url, video_title, max_retries=3)
-            
-            if success:
-                print(f"✅ Reproduciendo: {video_title}")
-                return True
-            else:
-                print(f"❌ No se pudo cargar el video después de 3 intentos")
-                return False
-        else:
-            print("❌ Opción inválida")
-            return False
-            
-    except ValueError:
-        print("❌ Entrada inválida")
-        return False
-    
 async def main():
+    global notificador
+    
     try:
         config = Config()
-        playwright, browser, page = await init_browser(config)
         
-        print("🎵 YouTube Player Interactivo - Escribe 'q' para salir en cualquier momento\n")
-
-        while True:
-            success = await play_youtube_interactive(config, page)
-            if not success:
-                break  
-
-            print("🎵 Video reproduciéndose...")
-            
-            await page.wait_for_load_state("domcontentloaded")
-            await asy_sleep(uniform(0.3, 0.7))
-
-            volume_button = page.locator(f"xpath={config.youtube_dict['icon_volumen']}")
-            await asy_sleep(uniform(0.5, 0.1))
-
-            button_count = await volume_button.count()
-
-            if button_count > 0:
-                await page.keyboard.press('M')
-
-            input("⏸️ Presiona Enter para buscar otro video o salir..." if config.headless.lower() == 'false' else "⏸️ [HEADLESS] Presiona Enter para continuar...")
-
-            next_action = input("🔁 ¿Buscar otro video? (Enter=Sí / q=Salir): ").strip()
-            if next_action.lower() == 'q':
-                break
-
-        return 0
-
-    except KeyboardInterrupt:
-        print("\n⚠️ Interrumpido por usuario")
-        return 130
+        print("=" * 50)
+        print("🤖 Bot de Telegram + Brave Browser con anti-detección")
+        print("=" * 50)
+        print("✅ Bloqueo de anuncios: ACTIVADO (Brave Shields)")
+        print("✅ Anti-detección: ACTIVADA")
+        print("=" * 50)
+        
+        if not config.telegram_token:
+            print("❌ ERROR: TELEGRAM_TOKEN no está configurado en .env")
+            return 1
+        
+        # ✅ 1. Instanciar BrowserManager y inyectarlo en NotificadorTelegram
+        browser_manager = BrowserManager()
+        notificador = NotificadorTelegram(config, browser_manager)
+        
+        # Crear aplicación de Telegram
+        application = Application.builder().token(config.telegram_token).build()
+        
+        # ✅ 2. Usar CommandHandler para comandos de texto (más limpio que MessageHandler + Regex)
+        application.add_handler(MessageHandler(filters.AUDIO, handle_telegram_audio))
+        application.add_handler(MessageHandler(filters.VOICE, handle_telegram_voice))
+        application.add_handler(CommandHandler('start', start_command))
+        application.add_handler(CommandHandler('help', help_command))
+        
+        print("✅ Bot de Telegram iniciado correctamente")
+        print("📱 Busca tu bot en Telegram y envía un audio o nota de voz")
+        print("🛡️ Brave se iniciará automáticamente cuando recibas un comando de música")
+        print("Press Ctrl+C para salir\n")
+        
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling()
+        
+        try:
+            while True:
+                await sleep(1)
+        except KeyboardInterrupt:
+            print("\n⚠️ Deteniendo bot...")
+            await application.updater.stop()
+            await application.stop()
+            await application.shutdown()
+        
     except Exception as e:
         print(f"\n💥 Error crítico: {e}")
         print_exc()
         return 1
     finally:
-        if 'browser' in locals() and browser:
-            await browser.close()
-        if 'playwright' in locals() and playwright:
-            await playwright.stop()
-        print("✅ Recursos liberados")
+        if notificador:
+            await notificador.close_browser()
+        print("\n✅ Programa finalizado")
 
 def run():
     exit_code = run_asy(main())

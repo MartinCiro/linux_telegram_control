@@ -1,0 +1,199 @@
+"""
+Gestor de navegador Brave con anti-detección y bloqueo de anuncios.
+Singleton pattern para mantener una sola instancia del navegador.
+"""
+
+from os import name as os_name, path as os_path
+from playwright.async_api import async_playwright, Browser, Page, Playwright
+from typing import Optional, Tuple
+from controller.utils.screen_utils import ScreenUtils
+
+
+class BrowserManager:
+    """Singleton para gestionar una única instancia del navegador Brave"""
+    
+    _instance: Optional['BrowserManager'] = None
+    _playwright: Optional[Playwright] = None
+    _browser: Optional[Browser] = None
+    _page: Optional[Page] = None
+    _context = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    def __init__(self):
+        self.config = None
+        self._initialized = False
+    
+    async def initialize(self, config) -> Tuple[bool, Optional[Page]]:
+        """
+        Inicializa el navegador Brave con anti-detección
+        
+        Args:
+            config: Instancia de Config
+            
+        Returns:
+            Tuple[bool, Optional[Page]]: (éxito, página)
+        """
+        self.config = config
+
+        if self._initialized and self._page and not self._page.is_closed():
+            self.config.log.comentario("INFO", "♻️ Reutilizando navegador existente")
+            return True, self._page
+        
+        
+        try:
+            self._playwright = await async_playwright().start()
+            user_data_dir = os_path.expanduser(config.user_browser_directory)
+            if not os_path.exists(user_data_dir):
+                os_path.makedirs(user_data_dir, exist_ok=True)
+            
+            brave_exec = config.get_chrome_path()
+            if not brave_exec:
+                config.log.comentario("ERROR", "❌ No se encontró la ruta de Brave Browser")
+                return False, None
+            
+            screen_w, screen_h = ScreenUtils.get_screen_size()
+            
+            # Configuración de lanzamiento con anti-detección
+            launch_options = {
+                'headless': config.headless.lower() == 'true',
+                'executable_path': brave_exec,
+                'args': [
+                    # Anti-detección fundamental
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-features=IsolateOrigins,site-per-process,AutomationControlled',
+                    
+                    # Mantener funcionalidad de Brave Shields
+                    # NO usar '--disable-brave-component-updates' si quieres bloqueo de anuncios
+                    
+                    # Configuración de rendimiento
+                    '--disable-dev-shm-usage',
+                    
+                    # Ocultar automatización (pero conservando funcionalidad de bloqueo)
+                    '--disable-infobars',
+                    
+                    # Cargar extenciones
+                    #'--disable-extensions-except=/path/to/ublock',
+                    
+                    # Autoplay y medios
+                    '--autoplay-policy=no-user-gesture-required',
+                    
+                    # Idioma
+                    '--lang=es-ES',
+                    '--accept-lang=es-ES,es,en-US,en',
+                ],
+                'ignore_default_args': ['--enable-automation', '--disable-extensions'],
+            }
+            
+            # Crear contexto persistente
+            self._context = await self._playwright.chromium.launch_persistent_context(
+                user_data_dir=user_data_dir,
+                **launch_options
+            )
+            
+            # Script stealth
+            stealth_script = """
+                // Eliminar webdriver - Método más compatible
+                delete Object.getPrototypeOf(navigator).webdriver;
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined,
+                    configurable: true
+                });
+                
+                // Simular chrome.runtime (Brave lo tiene nativo)
+                if (!window.chrome) {
+                    window.chrome = {
+                        runtime: {
+                            id: 'fake-id',
+                            connect: () => {},
+                            sendMessage: () => {}
+                        }
+                    };
+                }
+                
+                // Plugins realistas (NO sobrescribir si ya existen)
+                if (!navigator.plugins || navigator.plugins.length === 0) {
+                    const plugins = {
+                        0: { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+                        1: { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+                        2: { name: 'Native Client', filename: 'internal-nacl-plugin' },
+                        length: 3
+                    };
+                    Object.setPrototypeOf(plugins, PluginArray.prototype);
+                    Object.defineProperty(navigator, 'plugins', { get: () => plugins });
+                }
+                
+                // Idioma consistente
+                Object.defineProperty(navigator, 'languages', { get: () => ['es-ES', 'es', 'en'] });
+                
+                // Hardware moderno
+                Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+                Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+                
+                // Limpiar rastros de Playwright
+                delete window.__playwright;
+                delete window.__pw_manual;
+            """
+            
+            await self._context.add_init_script(stealth_script)
+            
+            # Headers HTTP realistas
+            await self._context.set_extra_http_headers({
+                'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+                'Sec-Ch-Ua': '"Brave";v="122", "Not:A-Brand";v="24", "Chromium";v="122"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Windows"' if os_name == 'nt' else '"Linux"',
+            })
+            
+            # Obtener o crear página
+            self._page = self._context.pages[0] if self._context.pages else await self._context.new_page()
+            await self._page.set_viewport_size({'width': screen_w, 'height': screen_h})
+            
+            # Asegurar una sola pestaña
+            self._page = await self._ensure_first_tab()
+            
+            self._initialized = True
+            config.log.comentario("SUCCESS", "🌐 Brave Browser iniciado con anti-detección y bloqueo de anuncios")
+            return True, self._page
+            
+        except Exception as e:
+            config.log.comentario("ERROR", f"❌ Error iniciando navegador: {str(e)}")
+            return False, None
+    
+    async def _ensure_first_tab(self):
+        """Asegura que solo haya una pestaña activa"""
+        if len(self._context.pages) == 0:
+            page = await self._context.new_page()
+            self.config.log.comentario("INFO", "📑 Creada nueva pestaña principal")
+        else:
+            page = self._context.pages[0]
+            
+            # Cerrar pestañas adicionales
+            if len(self._context.pages) > 1:
+                self.config.log.comentario("INFO", f"🧹 Cerrando {len(self._context.pages)-1} pestañas adicionales")
+                for i in range(len(self._context.pages) - 1, 0, -1):
+                    await self._context.pages[i].close()
+        
+        await page.bring_to_front()
+        return page
+    
+    async def get_page(self) -> Optional[Page]:
+        """Retorna la página actual del navegador"""
+        if not self._initialized or not self._page or self._page.is_closed():
+            return None
+        return self._page
+    
+    async def close(self):
+        """Cierra el navegador y libera recursos"""
+        if self._context:
+            await self._context.close()
+        if self._playwright:
+            await self._playwright.stop()
+        self._initialized = False
+        self.config.log.comentario("INFO", "🛑 Navegador cerrado")
+    
+    def is_initialized(self) -> bool:
+        return self._initialized and self._page and not self._page.is_closed()

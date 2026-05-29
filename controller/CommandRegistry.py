@@ -1,4 +1,3 @@
-# controller/commands/CommandRegistry.py
 from typing import Dict, Optional
 from re import findall
 from controller.Config import Command, Config
@@ -48,29 +47,36 @@ class CommandRegistry:
         return None
     
     def extract_parameters(self, text: str, command: Command) -> Optional[Dict]:
-        """
-        Extrae parámetros del texto según la definición del comando.
-        
-        Ejemplo: "volumen 75" → {"value": 75}
-        """
+        """Extrae parámetros según el tipo definido en command.parameters"""
         if not command.parameters:
             return None
         
-        params = {}
+        param_type = command.parameters.get("type")
+        text_lower = text.lower()
         
-        if command.parameters.get("type") == "integer":
-            # Buscar números en el texto
-            numbers = findall(r'\d+', text)
+        # ✅ CASO 1: Parámetro de texto libre (query de búsqueda)
+        if param_type == "query":
+            for trigger in command.trigger_words:
+                if trigger in text_lower:
+                    # Remover el trigger y quedarse con el resto
+                    query = text_lower.replace(trigger, "").strip()
+                    if query:
+                        return {"query": query}
+            return None
+        
+        # ✅ CASO 2: Parámetro numérico (volumen, etc.)
+        elif param_type == "integer":
+            numbers = findall(r'\d+', text_lower)
             if numbers:
-                params["value"] = int(numbers[0])
-                
-                # Validar rango
+                params = {"value": int(numbers[0])}
                 if "min" in command.parameters:
                     params["value"] = max(params["value"], command.parameters["min"])
                 if "max" in command.parameters:
                     params["value"] = min(params["value"], command.parameters["max"])
+                return params
+            return None
         
-        return params if params else None
+        return None
     
     def get_all_commands(self) -> Dict[str, Command]:
         """Retorna todos los comandos registrados"""

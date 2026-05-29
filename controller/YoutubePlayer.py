@@ -1,4 +1,3 @@
-# controller/YoutubePlayer.py
 from asyncio import sleep as asy_slp
 from random import uniform
 
@@ -154,3 +153,35 @@ class YoutubePlayer:
         # Si llegamos aquí, todos los intentos fallaron
         self.config.log.error(f"❌ Búsqueda falló después de {max_retries} intentos", "Search")
         return []
+    
+    async def play_video(self, url: str, max_retries: int = 3) -> bool:
+        """
+        Navega a una URL de video y espera que se reproduzca.
+        Sin input() — apto para entorno headless/Telegram.
+        """
+        for attempt in range(max_retries):
+            try:
+                await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                await asy_slp(2)  # Esperar inicialización de YouTube player
+                
+                # Verificar que el video esté presente
+                await self.page.wait_for_selector('video', timeout=10000)
+                
+                # Intentar play (YouTube a veces requiere interacción)
+                await self.page.keyboard.press(' ')  # Space = play/pause
+                
+                # Verificar que no haya error de reproducción
+                error = self.page.locator('.ytp-error')
+                if await error.count() > 0:
+                    error_msg = await error.first.text_content()
+                    self.config.log.error(f"❌ Error de YouTube: {error_msg}")
+                    return False
+                
+                return True
+                
+            except Exception as e:
+                self.config.log.comentario("WARNING", f"Intento {attempt+1} fallido: {e}")
+                if attempt == max_retries - 1:
+                    return False
+                await asy_slp(2 ** attempt)  # Espera exponencial
+        return False
