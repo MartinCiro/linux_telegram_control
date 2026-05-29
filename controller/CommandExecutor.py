@@ -20,10 +20,18 @@ class CommandExecutor:
         self.youtube_player: Optional[YoutubePlayer] = None
     
     async def _ensure_player(self) -> Optional[YoutubePlayer]:
-        """Lazy loading del reproductor"""
         if self.youtube_player:
-            return self.youtube_player
+            try:
+                if self.youtube_player.page.is_closed():
+                    self.config.log.comentario("WARNING", "⚠️ Página del player cerrada, reinstanciando...")
+                    self.youtube_player = None  # Invalidar caché
+                else:
+                    return self.youtube_player  # ✅ Vivo, reutilizar
+            except Exception as e:
+                self.config.log.comentario("WARNING", f"⚠️ Error validando player: {e}")
+                self.youtube_player = None
         
+        # ✅ 2. Inicializar desde cero
         success, page = await self.browser_manager.initialize(self.config)
         if success and page:
             self.youtube_player = YoutubePlayer(self.config, page)
@@ -31,16 +39,19 @@ class CommandExecutor:
         return None
     
     async def toggle_play_pause(self):
-        await self.page.keyboard.press(' ')
+        player = await self._ensure_player()
+        if player:
+            await player.page.keyboard.press(' ')
 
     async def set_volume(self, level: int):
-        """Ajusta volumen con flechas (YouTube: ↑=+5, ↓=-5)"""
-        current = getattr(self, '_vol', 50)
-        diff = level - current
-        key = 'ArrowUp' if diff > 0 else 'ArrowDown'
-        for _ in range(abs(diff) // 5):
-            await self.page.keyboard.press(key)
-        self._vol = level
+        player = await self._ensure_player()
+        if player:
+            current = getattr(player, '_vol', 50) 
+            diff = level - current
+            key = 'ArrowUp' if diff > 0 else 'ArrowDown'
+            for _ in range(abs(diff) // 5):
+                await player.page.keyboard.press(key)
+            player._vol = level
     
     async def execute(self, command_text: str) -> Dict[str, Any]:
         """

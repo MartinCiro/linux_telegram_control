@@ -4,28 +4,25 @@ Singleton pattern para mantener una sola instancia del navegador.
 """
 
 from os import name as os_name, path as os_path
-from playwright.async_api import async_playwright, Browser, Page, Playwright
+from playwright.async_api import async_playwright, BrowserContext, Browser, Page, Playwright
 from typing import Optional, Tuple
 from controller.utils.screen_utils import ScreenUtils
 
 
 class BrowserManager:
-    """Singleton para gestionar una única instancia del navegador Brave"""
-    
-    _instance: Optional['BrowserManager'] = None
-    _playwright: Optional[Playwright] = None
-    _browser: Optional[Browser] = None
-    _page: Optional[Page] = None
-    _context = None
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
+    """
+    Gestiona el ciclo de vida de Playwright/Brave.
+    ✅ Valida estado interno
+    ✅ Auto-recupera si se cierra/crasha
+    ✅ Devuelve siempre una página lista para usar
+    """
     
     def __init__(self):
-        self.config = None
+        self._playwright = None
+        self._context: Optional[BrowserContext] = None
+        self._page: Optional[Page] = None
         self._initialized = False
+        self.config = None 
     
     async def initialize(self, config) -> Tuple[bool, Optional[Page]]:
         """
@@ -39,10 +36,18 @@ class BrowserManager:
         """
         self.config = config
 
-        if self._initialized and self._page and not self._page.is_closed():
-            self.config.log.comentario("INFO", "♻️ Reutilizando navegador existente")
+        screen_w, screen_h = ScreenUtils.get_screen_size()
+        if self._is_alive():
+            if not self._page or self._page.is_closed():
+                self._page = await self._context.new_page() 
+                config.log.comentario("INFO", "📑 Nueva página creada en contexto existente")
+            
+            await self._page.bring_to_front()
+            await self._page.set_viewport_size({'width': screen_w, 'height': screen_h})
             return True, self._page
         
+        config.log.comentario("INFO", "🔄 Inicializando navegador Brave...")
+        await self._cleanup()
         
         try:
             self._playwright = await async_playwright().start()
@@ -54,8 +59,6 @@ class BrowserManager:
             if not brave_exec:
                 config.log.comentario("ERROR", "❌ No se encontró la ruta de Brave Browser")
                 return False, None
-            
-            screen_w, screen_h = ScreenUtils.get_screen_size()
             
             # Configuración de lanzamiento con anti-detección
             launch_options = {
@@ -160,7 +163,8 @@ class BrowserManager:
             return True, self._page
             
         except Exception as e:
-            config.log.comentario("ERROR", f"❌ Error iniciando navegador: {str(e)}")
+            config.log.error(str(e), "Inicializando el navegador")
+            await self._cleanup() 
             return False, None
     
     async def _ensure_first_tab(self):
@@ -187,13 +191,46 @@ class BrowserManager:
         return self._page
     
     async def close(self):
-        """Cierra el navegador y libera recursos"""
-        if self._context:
-            await self._context.close()
-        if self._playwright:
-            await self._playwright.stop()
-        self._initialized = False
-        self.config.log.comentario("INFO", "🛑 Navegador cerrado")
+        """Cierra explícitamente todos los recursos"""
+        await self._cleanup()
     
     def is_initialized(self) -> bool:
         return self._initialized and self._page and not self._page.is_closed()
+    
+    def _is_alive(self) -> bool:
+        alive = False
+        try:
+            alive = (self._playwright and 
+                    self._context and 
+                    not self._context.browser.is_closed() and
+                    (not self._page or not self._page.is_closed()))
+        except Exception as e:
+            if self.config:
+                self.config.log.comentario("DEBUG", f"🔍 _is_alive() error: {e}")
+        if self.config:
+            self.config.log.comentario("DEBUG", f"🔍 _is_alive() = {alive}")
+        return alive
+    
+    async def _cleanup(self):
+        """Limpia recursos huérfanos antes de reiniciar"""
+        try:
+            # ✅ Usar atributos con guión bajo
+            if self._page and not self._page.is_closed():
+                await self._page.close()
+            if self._context and not self._context.browser.is_closed():
+                await self._context.close()
+            if self._playwright:
+                await self._playwright.stop()
+            
+            # ✅ Verificar que config exista antes de loguear
+            if hasattr(self, 'config') and self.config:
+                self.config.log.comentario("INFO", "🛑 Navegador cerrado")
+        except Exception as e:
+            if hasattr(self, 'config') and self.config:
+                self.config.log.comentario("WARNING", f"⚠️ Error en cleanup: {e}")
+        finally:
+            # ✅ Resetear atributos con guión bajo
+            self._playwright = None
+            self._context = None
+            self._page = None
+            self._initialized = False
