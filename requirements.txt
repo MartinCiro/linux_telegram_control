@@ -1,0 +1,8 @@
+playwright
+playwright-stealth
+python-dotenv
+requests
+pillow
+opencv-python
+numpy
+cryptography
