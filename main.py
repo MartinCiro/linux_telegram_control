@@ -1,3 +1,4 @@
+# main.py
 from sys import exit
 from asyncio import sleep, run as run_asy
 from traceback import print_exc
@@ -22,28 +23,40 @@ async def handle_telegram_audio(update: Update, context: ContextTypes.DEFAULT_TY
     if not update.message.audio:
         await update.message.reply_text("❌ Envíame un archivo de audio")
         return
-    
+
     await update.message.reply_text("🎤 Recibido audio. Procesando comando...")
-    
+
     audio_file = await update.message.audio.get_file()
-    
+
     with NamedTemporaryFile(suffix='.ogg', delete=False) as tmp:
         await audio_file.download_to_drive(tmp.name) 
         audio_path = tmp.name
-    
+
     try:
+        # ✅ 1. Solo transcribir y convertir (NO ejecuta)
         command = await notificador.handle_audio_message(audio_path)
         
         if not command:
             await update.message.reply_text("❌ No entendí el comando en el audio")
-        else:
-            pass
+            return
+        
+        # ✅ 2. VALIDAR comando antes de ejecutar
+        # Verificar que no sea un comando incompleto (ej: "/play" sin query)
+        if command.startswith("/play"):
+            parts = command.split(maxsplit=1)
+            if len(parts) < 2 or not parts[1].strip():
+                await update.message.reply_text("❌ Debes decir qué quieres reproducir (ej: 'reproduce lofi')")
+                return
+        
+        # ✅ 3. Ejecutar comando (solo si pasó validación)
+        result = await notificador.execute_command(command)
+        await update.message.reply_text(result.get("message", "✅ Comando ejecutado"))
             
     except Exception as e:
         await update.message.reply_text(f"❌ Error al procesar audio: {str(e)}")
         print(f"Error: {e}")
     finally:
-        Path(audio_path).unlink(missing_ok=True)  
+        Path(audio_path).unlink(missing_ok=True)    
 
 async def handle_telegram_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Manejador para notas de voz"""
@@ -52,25 +65,38 @@ async def handle_telegram_voice(update: Update, context: ContextTypes.DEFAULT_TY
     if not update.message.voice:
         await update.message.reply_text("❌ Envíame una nota de voz")
         return
-    
+
     await update.message.reply_text("🎤 Recibida nota de voz. Procesando...")
-    
+
     voice_file = await update.message.voice.get_file()
-    
+
     with NamedTemporaryFile(suffix='.ogg', delete=False) as tmp:
         await voice_file.download_to_drive(tmp.name)  
         audio_path = tmp.name
-    
+
     try:
+        # ✅ 1. Solo transcribir y convertir (NO ejecuta)
         command = await notificador.handle_audio_message(audio_path)
         
         if not command:
             await update.message.reply_text("❌ No entendí el comando en la nota de voz")
+            return
+        
+        # ✅ 2. VALIDAR comando antes de ejecutar
+        if command.startswith("/play"):
+            parts = command.split(maxsplit=1)
+            if len(parts) < 2 or not parts[1].strip():
+                await update.message.reply_text("❌ Debes decir qué quieres reproducir (ej: 'reproduce lofi')")
+                return
+        
+        # ✅ 3. Ejecutar comando (solo si pasó validación)
+        result = await notificador.execute_command(command)
+        await update.message.reply_text(result.get("message", "✅ Comando ejecutado"))
             
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {str(e)}")
     finally:
-        Path(audio_path).unlink(missing_ok=True)  # ✅ FIX
+        Path(audio_path).unlink(missing_ok=True)
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando /start"""
@@ -98,7 +124,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def main():
     global notificador
-    
     try:
         config = Config()
         

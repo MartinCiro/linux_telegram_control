@@ -1,3 +1,4 @@
+# controller/CommandRegistry.py
 from typing import Dict, Optional
 from re import findall
 from controller.Config import Command, Config
@@ -32,11 +33,16 @@ class CommandRegistry:
         
         text_lower = text.lower()
         
+        if text_lower.startswith('/'):
+            action = text_lower.split()[0]
+            for cmd in self.commands.values():
+                if cmd.action == action:  # Busca por action
+                    return cmd
+                
         for cmd in self.commands.values():
             for trigger in cmd.trigger_words:
                 if trigger in text_lower:
                     return cmd
-        
         return None
     
     def get_command_by_action(self, action: str) -> Optional[Command]:
@@ -60,6 +66,10 @@ class CommandRegistry:
                 if trigger in text_lower:
                     # Remover el trigger y quedarse con el resto
                     query = text_lower.replace(trigger, "").strip()
+                    
+                    # ✅ LIMPIAR caracteres residuales como "/" al inicio
+                    query = query.lstrip("/").strip()
+                    
                     if query:
                         return {"query": query}
             return None

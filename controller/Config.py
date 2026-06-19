@@ -42,7 +42,7 @@ class Config:
         if value is not None:
             return value
          
-        return getenv("YOUTUBE_QUERY", "lofi hip hop radio")
+        return getenv("YOUTUBE_QUERY")
     
     @property
     def commands(self) -> Dict[str, Command]:
@@ -133,9 +133,51 @@ class Config:
                 description="Saluda al bot"
             ),
             "reproduce": Command(
-                trigger_words=["reproduce", "pon", "toca", "play", "reproducir", "pon música"],
+                trigger_words=["reproduce", "pon", "toca", "play", "reproducir", "pon música", "buscar", "search", "encuentra", "busca"],
                 action="/play",
-                description="Reproduce música (ej: 'reproduce lofi')"
+                description="Reproduce música (ej: 'reproduce lofi')",
+                parameters={"type": "query"}
+            ),
+            "pausa": Command(
+                trigger_words=["pausa", "pausar", "detén", "para", "detener", "espera"],
+                action="/pause",
+                description="Pausa la reproducción"
+            ),
+            "continuar": Command(
+                trigger_words=["continuar", "reanudar", "sigue", "resume", "despausa"],
+                action="/resume",
+                description="Reanuda la reproducción"
+            ),
+            "siguiente": Command(
+                trigger_words=["siguiente", "next", "siguiente video", "salta"],
+                action="/next",
+                description="Reproduce el siguiente video"
+            ),
+            "anterior": Command(
+                trigger_words=["anterior", "prev", "anterior video", "atrás", "retrocede"],
+                action="/prev",
+                description="Reproduce el video anterior"
+            ),
+            "pantalla completa": Command(
+                trigger_words=["pantalla completa", "full screen", "fullscreen", "ampliar"],
+                action="/fullscreen",
+                description="Activa pantalla completa"
+            ),
+            "volumen": Command(
+                trigger_words=["volumen", "sube volumen", "baja volumen", "volumen a", "set volume"],
+                action="/volume",
+                description="Ajusta volumen (ej: 'volumen 50')",
+                parameters={"type": "integer", "min": 0, "max": 100}
+            ),
+            "ayuda": Command(
+                trigger_words=["ayuda", "comandos", "qué puedes hacer", "help", "que hacer"],
+                action="/help",
+                description="Muestra esta ayuda"
+            ),
+            "apaga": Command(
+                trigger_words=["apagar", "salir", "adios", "apagate", "cierra todo", "basta", "exit", "terminar", "adiós", "hasta luego"],
+                action="/shutdown",
+                description="Apaga el ordenador"
             )
         }
     

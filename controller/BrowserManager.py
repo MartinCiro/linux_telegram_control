@@ -1,3 +1,4 @@
+# controller/BrowserManager.py
 """
 Gestor de navegador Brave con anti-detección y bloqueo de anuncios.
 Singleton pattern para mantener una sola instancia del navegador.
@@ -62,38 +63,43 @@ class BrowserManager:
             
             # Configuración de lanzamiento con anti-detección
             launch_options = {
-                'headless': config.headless.lower() == 'true',
+                'headless': config.headless.lower() == 'true', # Usa 'new' si es posible en tu versión de Playwright
                 'executable_path': brave_exec,
                 'args': [
-                    # Anti-detección fundamental
+                    # --- Anti-Detección Fundamental ---
                     '--disable-blink-features=AutomationControlled',
-                    '--disable-features=IsolateOrigins,site-per-process,AutomationControlled',
+                    '--disable-features=IsolateOrigins,site-per-process,TranslateUI,PrivacySandboxFirstPartySets',
                     
-                    # Mantener funcionalidad de Brave Shields
-                    # NO usar '--disable-brave-component-updates' si quieres bloqueo de anuncios
-                    
-                    # Configuración de rendimiento
+                    # --- Huella Digital y Rendimiento ---
                     '--disable-dev-shm-usage',
+                    '--force-color-profile=srgb',
+                    '--disable-accelerated-2d-canvas', # A veces necesario para evitar detección de GPU
+                    '--no-first-run',
+                    '--no-default-browser-check',
                     
-                    # Ocultar automatización (pero conservando funcionalidad de bloqueo)
+                    # --- Limpieza de Interfaz ---
                     '--disable-infobars',
+                    '--disable-background-networking', # Evita pings de fondo de Brave/Google
+                    '--disable-sync',
                     
-                    # Cargar extenciones
-                    #'--disable-extensions-except=/path/to/ublock',
-                    
-                    # Autoplay y medios
-                    '--autoplay-policy=no-user-gesture-required',
-                    
-                    # Idioma
+                    # --- Idioma y Regionalización ---
                     '--lang=es-ES',
-                    '--accept-lang=es-ES,es,en-US,en',
+                    '--accept-lang=es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7',
+                    
+                    # --- Brave Específico (Opcional) ---
+                    # '--disable-brave-component-updates', # ¡Cuidado! Rompe actualizaciones de Shields
+                    '--start-maximized',
                 ],
-                'ignore_default_args': ['--enable-automation', '--disable-extensions'],
+                'ignore_default_args': [
+                    '--enable-automation', 
+                    '--disable-extensions', # ¡Importante! No deshabilitar extensiones si usas uBlock en el perfil
+                ],
             }
             
             # Crear contexto persistente
             self._context = await self._playwright.chromium.launch_persistent_context(
                 user_data_dir=user_data_dir,
+                no_viewport=True,
                 **launch_options
             )
             
@@ -153,7 +159,7 @@ class BrowserManager:
             
             # Obtener o crear página
             self._page = self._context.pages[0] if self._context.pages else await self._context.new_page()
-            await self._page.set_viewport_size({'width': screen_w, 'height': screen_h})
+            #await self._page.set_viewport_size({'width': screen_w, 'height': screen_h})
             
             # Asegurar una sola pestaña
             self._page = await self._ensure_first_tab()
