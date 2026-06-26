@@ -28,14 +28,14 @@ class SpeechToCommand:
         
         # Cache de archivos temporales (para limpieza automática)
         self._temp_files = set()
-    
+
     def _convert_to_wav(self, input_path: str) -> Optional[str]:
         """
         Convierte cualquier formato de audio a WAV para SpeechRecognition
         
         Args:
             input_path: Ruta del archivo original
-        
+            
         Returns:
             Ruta del archivo WAV temporal o None si falla
         """
@@ -59,7 +59,7 @@ class SpeechToCommand:
         except Exception as e:
             self.config.log.error(f"❌ Error en conversión: {e}")
             return None
-    
+
     def transcribe_audio_file(self, audio_file_path: str, language: str = "es-ES") -> Optional[str]:
         """
         Transcribe un archivo de audio a texto.
@@ -68,7 +68,7 @@ class SpeechToCommand:
         Args:
             audio_file_path: Ruta al archivo de audio
             language: Código de idioma (default: es-ES)
-        
+            
         Returns:
             Texto transcrito o None si falla
         """
@@ -99,10 +99,9 @@ class SpeechToCommand:
                 
                 # Usar Google Speech Recognition
                 text = self.recognizer.recognize_google(audio_data, language=language)
+                self.config.log.comentario("INFO", f"📝 Transcripción: '{text}'")
+                return text.lower()
                 
-            self.config.log.comentario("INFO", f"📝 Transcripción: '{text}'")
-            return text.lower()
-            
         except sr.UnknownValueError:
             self.config.log.comentario("WARNING", "❓ No se pudo entender el audio")
             return None
@@ -112,19 +111,18 @@ class SpeechToCommand:
         except Exception as e:
             self.config.log.error(f"💥 Error al procesar archivo: {e}")
             return None
-            
         finally:
             self._cleanup_temp_files(temp_wav)
-    
+
     def text_to_command(self, text: str) -> Optional[str]:
         """
         Convierte texto a comando utilizando CommandRegistry.
         
         Args:
             text: Texto transcrito
-        
+            
         Returns:
-            Comando a ejecutar (ej: "/saluda") o None
+            Comando a ejecutar (ej: "/saluda") o None si no es válido
         """
         if not text:
             return None
@@ -146,26 +144,29 @@ class SpeechToCommand:
             self.config.log.comentario("INFO", f"✅ Comando detectado: '{final_command}'")
             return final_command
         
+        # ✅ CORRECCIÓN: Retornar None cuando no hay comando válido
         msg = self.command_registry.get_missing_command_message(text)
         self.config.log.comentario("INFO", msg)
-        return msg
-    
+        return None  # ← CAMBIO CRÍTICO: Retornar None, no el mensaje
+
     def process_audio_to_command(self, audio_file_path: str) -> Optional[str]:
         """
         Proceso completo: archivo de audio → texto → comando
         
         Args:
             audio_file_path: Ruta al archivo de audio
-        
+            
         Returns:
             Comando a ejecutar o None
         """
         text = self.transcribe_audio_file(audio_file_path)
+        
         if not text:
             return None
+        
         self.config.log.comentario("INFO", f"✅ Texto recibido: '{text}'")
         return self.text_to_command(text)
-    
+
     def process_audio_bytes(self, audio_bytes: bytes, format: str = 'ogg') -> Optional[str]:
         """
         Procesa audio desde bytes (útil para descargas de Telegram)
@@ -173,7 +174,7 @@ class SpeechToCommand:
         Args:
             audio_bytes: Datos del audio en bytes
             format: Formato del audio ('wav', 'mp3', 'ogg')
-        
+            
         Returns:
             Comando a ejecutar o None
         """
@@ -182,14 +183,14 @@ class SpeechToCommand:
         with tempfile.NamedTemporaryFile(suffix=f'.{format}', delete=False) as tmp_file:
             tmp_file.write(audio_bytes)
             tmp_path = tmp_file.name
-        
-        try:
-            self._temp_files.add(tmp_path)
-            result = self.process_audio_to_command(tmp_path)
-            return result
-        finally:
-            self._cleanup_temp_files(tmp_path)
-    
+            
+            try:
+                self._temp_files.add(tmp_path)
+                result = self.process_audio_to_command(tmp_path)
+                return result
+            finally:
+                self._cleanup_temp_files(tmp_path)
+
     def _cleanup_temp_files(self, *paths):
         """Limpia archivos temporales"""
         for path in paths:
@@ -207,11 +208,11 @@ class SpeechToCommand:
                 self._temp_files.discard(temp_path)
             except Exception:
                 pass
-    
+
     def get_available_commands(self) -> Dict[str, Command]:
         """Retorna todos los comandos disponibles"""
         return self.command_registry.get_all_commands()
-    
+
     def get_help_text(self) -> str:
         """Retorna texto de ayuda formateado"""
         return self.command_registry.get_help_text()

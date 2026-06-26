@@ -1,0 +1,8 @@
+aiohttp==3.13.5
+playwright==1.59.0
+pydub==0.25.1
+python-dotenv==1.2.2
+python-telegram-bot==22.7
+Requests==2.34.2
+speechrecognition==3.16.1
+playwright-stealth
